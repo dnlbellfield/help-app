@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCoachResponse, getCoachModel } from "./coach-core.mjs";
+import { createCoachResponse, getCoachModel, transcribeAudio } from "./coach-core.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const staticRoot = join(root, "public");
@@ -27,10 +27,16 @@ createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/transcribe") {
+      await handleTranscription(request, response);
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/status") {
       sendJson(response, 200, {
         live: Boolean(process.env.OPENAI_API_KEY),
-        model: Boolean(process.env.OPENAI_API_KEY) ? getCoachModel() : null
+        model: Boolean(process.env.OPENAI_API_KEY) ? getCoachModel() : null,
+        voiceTranscription: Boolean(process.env.OPENAI_API_KEY)
       });
       return;
     }
@@ -60,6 +66,19 @@ async function handleCoach(request, response) {
     sendJson(response, 200, result);
   } catch (error) {
     sendJson(response, error.status || 500, { error: error.message || "Coach request failed" });
+  }
+}
+
+async function handleTranscription(request, response) {
+  try {
+    const body = await readJsonBody(request);
+    const result = await transcribeAudio({
+      audioBase64: body.audioBase64,
+      mimeType: body.mimeType
+    });
+    sendJson(response, 200, result);
+  } catch (error) {
+    sendJson(response, error.status || 500, { error: error.message || "Transcription failed" });
   }
 }
 

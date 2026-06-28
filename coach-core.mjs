@@ -2,6 +2,10 @@ export function getCoachModel() {
   return process.env.OPENAI_MODEL || "gpt-4.1-mini";
 }
 
+export function getTranscriptionModel() {
+  return process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+}
+
 export const systemPrompt = `
 You are Repair, a supportive attachment repair and emotional regulation practice tool.
 
@@ -190,4 +194,65 @@ Give language the user can send, what to avoid, and one or more caring actions m
   }
 
   return JSON.parse(text);
+}
+
+export async function transcribeAudio({ audioBase64, mimeType }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    const error = new Error("OPENAI_API_KEY is not configured");
+    error.status = 503;
+    throw error;
+  }
+
+  const cleanAudio = String(audioBase64 || "").trim();
+  if (!cleanAudio) {
+    const error = new Error("Missing audio payload");
+    error.status = 400;
+    throw error;
+  }
+
+  const buffer = Buffer.from(cleanAudio, "base64");
+  if (!buffer.length) {
+    const error = new Error("Audio payload was empty");
+    error.status = 400;
+    throw error;
+  }
+
+  const contentType = String(mimeType || "audio/webm").trim() || "audio/webm";
+  const form = new FormData();
+  form.append("model", getTranscriptionModel());
+  form.append("language", "en");
+  form.append("file", new Blob([buffer], { type: contentType }), `voice-input.${getAudioExtension(contentType)}`);
+
+  const apiResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`
+    },
+    body: form
+  });
+
+  const data = await apiResponse.json().catch(() => ({}));
+  if (!apiResponse.ok) {
+    const error = new Error(data.error?.message || "Audio transcription failed");
+    error.status = apiResponse.status;
+    throw error;
+  }
+
+  const text = String(data.text || "").trim();
+  if (!text) {
+    const error = new Error("Transcription returned no text");
+    error.status = 502;
+    throw error;
+  }
+
+  return { text };
+}
+
+function getAudioExtension(mimeType) {
+  if (mimeType.includes("mp4") || mimeType.includes("mpeg4")) return "m4a";
+  if (mimeType.includes("mpeg")) return "mp3";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
 }

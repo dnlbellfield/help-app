@@ -20,6 +20,9 @@ const crisisWords = ["suicide", "kill myself", "hurt myself", "hurt them", "unsa
 const conversation = [];
 let recognition = null;
 let listening = false;
+let mediaRecorder = null;
+let mediaStream = null;
+let recordedChunks = [];
 
 function applyTheme(theme) {
   const nextTheme = theme === "dark" ? "dark" : "light";
@@ -62,6 +65,137 @@ function escapeHtml(text) {
 
 function formatReply(text) {
   return escapeHtml(text).replace(/\n/g, "<br>");
+}
+
+function setVoiceIdleState(label = "Speak", title = "Speak instead of typing") {
+  listening = false;
+  voiceButton.disabled = false;
+  voiceButton.classList.remove("listening");
+  voiceButton.textContent = label;
+  voiceButton.title = title;
+  voiceButton.setAttribute("aria-pressed", "false");
+  userInput.placeholder = "Example: They said they need space and now I feel panicky and angry. I want to text a lot or shut down.";
+}
+
+function setVoiceBusyState(label, title) {
+  listening = true;
+  voiceButton.disabled = false;
+  voiceButton.classList.add("listening");
+  voiceButton.textContent = label;
+  voiceButton.title = title;
+  voiceButton.setAttribute("aria-pressed", "true");
+  userInput.placeholder = "Listening... say what happened in your own words.";
+}
+
+function appendTranscript(text) {
+  const existing = userInput.value.trim();
+  userInput.value = existing ? `${existing} ${text}`.trim() : text;
+}
+
+function showVoiceError(message) {
+  addMessage("coach", `<strong>Voice input could not start.</strong> ${escapeHtml(message || "Please check microphone permission.")}`);
+}
+
+function browserSupportsRecordedVoice() {
+  return Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+}
+
+function getPreferredAudioMimeType() {
+  if (!window.MediaRecorder?.isTypeSupported) return "";
+
+  const options = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus"
+  ];
+
+  return options.find((mimeType) => window.MediaRecorder.isTypeSupported(mimeType)) || "";
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read recorded audio"));
+    reader.onloadend = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function transcribeRecordedAudio(blob) {
+  const audioBase64 = await blobToBase64(blob);
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      audioBase64,
+      mimeType: blob.type || "audio/webm"
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Transcription unavailable");
+  }
+
+  const text = String(payload.text || "").trim();
+  if (!text) throw new Error("Transcription returned no text");
+  return text;
+}
+
+async function stopRecordedVoice() {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+
+  const completion = new Promise((resolve) => {
+    mediaRecorder.addEventListener("stop", resolve, { once: true });
+  });
+
+  mediaRecorder.stop();
+  setVoiceBusyState("Transcribing", "Turning your recording into text");
+  await completion;
+}
+
+async function startRecordedVoice() {
+  const mimeType = getPreferredAudioMimeType();
+  recordedChunks = [];
+  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  mediaRecorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
+
+  mediaRecorder.addEventListener("dataavailable", (event) => {
+    if (event.data?.size) recordedChunks.push(event.data);
+  });
+
+  mediaRecorder.addEventListener("stop", async () => {
+    const currentStream = mediaStream;
+    mediaStream = null;
+    currentStream?.getTracks().forEach((track) => track.stop());
+
+    try {
+      const audioBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || mimeType || "audio/webm" });
+      recordedChunks = [];
+      const transcript = await transcribeRecordedAudio(audioBlob);
+      appendTranscript(transcript);
+      setVoiceIdleState("Record", "Record your voice and transcribe it");
+    } catch (error) {
+      recordedChunks = [];
+      setVoiceIdleState("Record", "Record your voice and transcribe it");
+      showVoiceError(error?.message || "Please check microphone permission.");
+    }
+  }, { once: true });
+
+  mediaRecorder.addEventListener("error", () => {
+    mediaStream?.getTracks().forEach((track) => track.stop());
+    mediaStream = null;
+    recordedChunks = [];
+    setVoiceIdleState("Record", "Record your voice and transcribe it");
+    showVoiceError("Recording failed on this device.");
+  }, { once: true });
+
+  mediaRecorder.start();
+  setVoiceBusyState("Stop", "Stop recording and transcribe what you said");
 }
 
 function detect(text) {
@@ -262,63 +396,81 @@ function startChat() {
   `);
 }
 
-function setupVoiceInput() {
+function setupVoiceInput(status = {}) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    voiceButton.disabled = true;
-    voiceButton.textContent = "Voice unavailable";
-    voiceButton.title = "Speech recognition is not supported in this browser";
+
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    let finalTranscript = "";
+
+    recognition.addEventListener("start", () => {
+      finalTranscript = userInput.value ? `${userInput.value.trim()} ` : "";
+      setVoiceBusyState("Listening", "Listening to your speech");
+    });
+
+    recognition.addEventListener("result", (event) => {
+      let interimTranscript = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0].transcript;
+        if (event.results[index].isFinal) finalTranscript += `${transcript} `;
+        else interimTranscript += transcript;
+      }
+      userInput.value = `${finalTranscript}${interimTranscript}`.trim();
+    });
+
+    recognition.addEventListener("end", () => {
+      setVoiceIdleState("Speak", "Speak instead of typing");
+    });
+
+    recognition.addEventListener("error", (event) => {
+      setVoiceIdleState("Speak", "Speak instead of typing");
+      showVoiceError(event.error || "Please check microphone permission.");
+    });
+
+    voiceButton.addEventListener("click", () => {
+      if (listening) {
+        recognition.stop();
+        return;
+      }
+      recognition.start();
+    });
     return;
   }
 
-  recognition = new SpeechRecognition();
-  recognition.lang = "en-US";
-  recognition.continuous = true;
-  recognition.interimResults = true;
+  if (!status.voiceTranscription || !browserSupportsRecordedVoice()) {
+    voiceButton.disabled = true;
+    voiceButton.textContent = "Voice unavailable";
+    voiceButton.title = status.voiceTranscription
+      ? "Voice recording is not supported in this browser"
+      : "Voice transcription needs a live server connection";
+    return;
+  }
 
-  let finalTranscript = "";
-
-  recognition.addEventListener("start", () => {
-    listening = true;
-    finalTranscript = userInput.value ? `${userInput.value.trim()} ` : "";
-    voiceButton.classList.add("listening");
-    voiceButton.textContent = "Listening";
-    voiceButton.setAttribute("aria-pressed", "true");
-    userInput.placeholder = "Listening... say what happened in your own words.";
-  });
-
-  recognition.addEventListener("result", (event) => {
-    let interimTranscript = "";
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const transcript = event.results[index][0].transcript;
-      if (event.results[index].isFinal) finalTranscript += `${transcript} `;
-      else interimTranscript += transcript;
-    }
-    userInput.value = `${finalTranscript}${interimTranscript}`.trim();
-  });
-
-  recognition.addEventListener("end", () => {
-    listening = false;
-    voiceButton.classList.remove("listening");
-    voiceButton.textContent = "Speak";
-    voiceButton.setAttribute("aria-pressed", "false");
-    userInput.placeholder = "Example: They said they need space and now I feel panicky and angry. I want to text a lot or shut down.";
-  });
-
-  recognition.addEventListener("error", (event) => {
-    listening = false;
-    voiceButton.classList.remove("listening");
-    voiceButton.textContent = "Speak";
-    voiceButton.setAttribute("aria-pressed", "false");
-    addMessage("coach", `<strong>Voice input could not start.</strong> ${escapeHtml(event.error || "Please check microphone permission.")}`);
-  });
-
-  voiceButton.addEventListener("click", () => {
+  setVoiceIdleState("Record", "Record your voice and transcribe it");
+  voiceButton.addEventListener("click", async () => {
     if (listening) {
-      recognition.stop();
+      try {
+        await stopRecordedVoice();
+      } catch (error) {
+        setVoiceIdleState("Record", "Record your voice and transcribe it");
+        showVoiceError(error?.message || "Please check microphone permission.");
+      }
       return;
     }
-    recognition.start();
+
+    try {
+      await startRecordedVoice();
+    } catch (error) {
+      mediaStream?.getTracks().forEach((track) => track.stop());
+      mediaStream = null;
+      recordedChunks = [];
+      setVoiceIdleState("Record", "Record your voice and transcribe it");
+      showVoiceError(error?.message || "Please check microphone permission.");
+    }
   });
 }
 
@@ -330,13 +482,15 @@ async function checkLiveStatus() {
     if (status.live) {
       liveStatus.textContent = "Live AI";
       liveStatus.className = "live-status on";
-      return;
+      return status;
     }
     liveStatus.textContent = "Local fallback";
     liveStatus.className = "live-status off";
+    return status;
   } catch {
     liveStatus.textContent = "Local fallback";
     liveStatus.className = "live-status off";
+    return { live: false, voiceTranscription: false };
   }
 }
 
@@ -426,5 +580,6 @@ sootheButton.addEventListener("click", async () => {
 
 setupThemeToggle();
 startChat();
-setupVoiceInput();
-checkLiveStatus();
+checkLiveStatus().then((status) => {
+  setupVoiceInput(status);
+});

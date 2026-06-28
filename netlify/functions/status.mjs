@@ -4,7 +4,8 @@ export default async () => {
   const live = Boolean(process.env.OPENAI_API_KEY);
   return new Response(JSON.stringify({
     live,
-    model: live ? getCoachModel() : null
+    model: live ? getCoachModel() : null,
+    voiceTranscription: live
   }), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
