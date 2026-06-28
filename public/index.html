@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Repair</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="coach">
+        <header class="coach-header">
+          <div class="header-copy">
+            <div class="brand-row">
+              <p class="eyebrow">Repair</p>
+            </div>
+            <h1>Slow the moment down.</h1>
+            <p class="subtitle">Stop harm, regulate, repair, and choose the next steady move.</p>
+          </div>
+          <div class="header-actions">
+            <span id="liveStatus" class="live-status">Checking live mode</span>
+            <button id="themeToggle" class="icon-button" type="button" aria-pressed="false" title="Switch to dark mode">Dark</button>
+            <button id="sourcesButton" class="icon-button" type="button" title="View sources">Sources</button>
+            <button id="resetChat" class="icon-button" type="button" title="Reset chat">Reset</button>
+          </div>
+        </header>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <form id="chatForm" class="chat-form">
+          <div class="quick-actions" aria-label="Focused help actions">
+            <button id="availabilityButton" class="action-chip" type="button" title="Get emotional availability suggestions">Be available</button>
+            <button id="checkInButton" class="action-chip" type="button" title="Get help checking in after causing hurt">Check in</button>
+            <button id="sootheButton" class="action-chip" type="button" title="Get soothing and support ideas">Soothe + Support</button>
+          </div>
+          <div class="composer">
+            <textarea id="userInput" placeholder="Say the messy version here..." rows="3"></textarea>
+            <div class="composer-actions">
+              <button id="voiceButton" class="voice-button" type="button" aria-pressed="false" title="Speak instead of typing">Speak</button>
+              <button class="send-button" type="submit">Send</button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <div id="resetDialog" class="dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="resetTitle" hidden>
+      <section class="dialog-panel">
+        <p class="eyebrow">Reset</p>
+        <h2 id="resetTitle">Clear this conversation?</h2>
+        <p class="dialog-copy">This removes the messages from this browser session. It will not affect your settings or API connection.</p>
+        <div class="dialog-actions">
+          <button id="cancelReset" class="dialog-button secondary" type="button">Cancel</button>
+          <button id="confirmReset" class="dialog-button danger" type="button">Reset</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="sourcesDialog" class="dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="sourcesTitle" hidden>
+      <section class="dialog-panel sources-panel">
+        <p class="eyebrow">Sources</p>
+        <h2 id="sourcesTitle">Where the guidance comes from</h2>
+        <p class="dialog-copy">Repair is source-informed support, not therapy or a diagnosis. It combines practical skills from established clinical and relationship frameworks, then applies them to the situation you describe.</p>
+
+        <ul class="source-list">
+          <li><a href="https://behavioraltech.org/resources/faqs/dialectical-behavior-therapy-dbt/" target="_blank" rel="noreferrer">DBT skills</a><span>emotion regulation, distress tolerance, pausing before harmful action.</span></li>
+          <li><a href="https://www.gottman.com/blog/r-is-for-repair/" target="_blank" rel="noreferrer">Gottman repair concepts</a><span>repair attempts, de-escalation, returning after conflict.</span></li>
+          <li><a href="https://www.thehotline.org/resources/healthy-relationships/" target="_blank" rel="noreferrer">The Hotline</a><span>healthy vs. unhealthy vs. abusive relationship behavior, boundaries, safety.</span></li>
+          <li><a href="https://988lifeline.org/" target="_blank" rel="noreferrer">988 Lifeline</a><span>crisis support when someone may be unsafe or overwhelmed beyond app support.</span></li>
+          <li><a href="https://www.cnvc.org/" target="_blank" rel="noreferrer">Nonviolent Communication</a><span>observation, feeling, need, request language for safer messages.</span></li>
+          <li><a href="https://store.samhsa.gov/product/samhsas-concept-trauma-and-guidance-trauma-informed-approach/sma14-4884" target="_blank" rel="noreferrer">SAMHSA trauma-informed approach</a><span>safety, choice, collaboration, empowerment, and avoiding retraumatizing responses.</span></li>
+        </ul>
+
+        <p class="dialog-copy small">For repeated aggression, lying, emotional abuse, or fear of escalation, use Repair as a bridge to real support: individual therapy, DBT skills training, couples therapy when safe, or a local interpersonal violence intervention program.</p>
+
+        <div class="dialog-actions">
+          <button id="closeSources" class="dialog-button secondary" type="button">Close</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
