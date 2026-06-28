@@ -23,6 +23,8 @@ let listening = false;
 let mediaRecorder = null;
 let mediaStream = null;
 let recordedChunks = [];
+let voiceMode = "unavailable";
+let voiceStatus = { live: false, voiceTranscription: false };
 
 function applyTheme(theme) {
   const nextTheme = theme === "dark" ? "dark" : "light";
@@ -94,6 +96,17 @@ function appendTranscript(text) {
 
 function showVoiceError(message) {
   addMessage("coach", `<strong>Voice input could not start.</strong> ${escapeHtml(message || "Please check microphone permission.")}`);
+}
+
+function canUseRecordedVoice() {
+  return Boolean(voiceStatus.voiceTranscription && browserSupportsRecordedVoice());
+}
+
+function switchToRecordedVoiceFallback() {
+  recognition = null;
+  voiceMode = "record";
+  setVoiceIdleState("Record", "Record your voice and transcribe it");
+  addMessage("coach", "<strong>Voice mode changed.</strong> Browser speech recognition is blocked here, so I switched to tap-to-record voice input.");
 }
 
 function browserSupportsRecordedVoice() {
@@ -396,10 +409,45 @@ function startChat() {
   `);
 }
 
+async function handleVoiceButtonClick() {
+  if (voiceMode === "speech") {
+    if (listening) {
+      recognition.stop();
+      return;
+    }
+    recognition.start();
+    return;
+  }
+
+  if (voiceMode === "record") {
+    if (listening) {
+      try {
+        await stopRecordedVoice();
+      } catch (error) {
+        setVoiceIdleState("Record", "Record your voice and transcribe it");
+        showVoiceError(error?.message || "Please check microphone permission.");
+      }
+      return;
+    }
+
+    try {
+      await startRecordedVoice();
+    } catch (error) {
+      mediaStream?.getTracks().forEach((track) => track.stop());
+      mediaStream = null;
+      recordedChunks = [];
+      setVoiceIdleState("Record", "Record your voice and transcribe it");
+      showVoiceError(error?.message || "Please check microphone permission.");
+    }
+  }
+}
+
 function setupVoiceInput(status = {}) {
+  voiceStatus = status;
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (SpeechRecognition) {
+    voiceMode = "speech";
     recognition = new SpeechRecognition();
     recognition.lang = "en-US";
     recognition.continuous = true;
@@ -423,25 +471,23 @@ function setupVoiceInput(status = {}) {
     });
 
     recognition.addEventListener("end", () => {
-      setVoiceIdleState("Speak", "Speak instead of typing");
+      if (voiceMode === "speech") setVoiceIdleState("Speak", "Speak instead of typing");
     });
 
     recognition.addEventListener("error", (event) => {
-      setVoiceIdleState("Speak", "Speak instead of typing");
-      showVoiceError(event.error || "Please check microphone permission.");
-    });
-
-    voiceButton.addEventListener("click", () => {
-      if (listening) {
-        recognition.stop();
+      const speechError = String(event.error || "").trim();
+      if ((speechError === "service-not-allowed" || speechError === "not-allowed") && canUseRecordedVoice()) {
+        switchToRecordedVoiceFallback();
         return;
       }
-      recognition.start();
+      setVoiceIdleState("Speak", "Speak instead of typing");
+      showVoiceError(speechError || "Please check microphone permission.");
     });
     return;
   }
 
-  if (!status.voiceTranscription || !browserSupportsRecordedVoice()) {
+  if (!canUseRecordedVoice()) {
+    voiceMode = "unavailable";
     voiceButton.disabled = true;
     voiceButton.textContent = "Voice unavailable";
     voiceButton.title = status.voiceTranscription
@@ -450,28 +496,8 @@ function setupVoiceInput(status = {}) {
     return;
   }
 
+  voiceMode = "record";
   setVoiceIdleState("Record", "Record your voice and transcribe it");
-  voiceButton.addEventListener("click", async () => {
-    if (listening) {
-      try {
-        await stopRecordedVoice();
-      } catch (error) {
-        setVoiceIdleState("Record", "Record your voice and transcribe it");
-        showVoiceError(error?.message || "Please check microphone permission.");
-      }
-      return;
-    }
-
-    try {
-      await startRecordedVoice();
-    } catch (error) {
-      mediaStream?.getTracks().forEach((track) => track.stop());
-      mediaStream = null;
-      recordedChunks = [];
-      setVoiceIdleState("Record", "Record your voice and transcribe it");
-      showVoiceError(error?.message || "Please check microphone permission.");
-    }
-  });
 }
 
 async function checkLiveStatus() {
@@ -577,6 +603,8 @@ sootheButton.addEventListener("click", async () => {
     `);
   }
 });
+
+voiceButton.addEventListener("click", handleVoiceButtonClick);
 
 setupThemeToggle();
 startChat();
